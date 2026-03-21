@@ -1,18 +1,14 @@
 # Titanic Survival Prediction Model
 
-A comprehensive machine learning pipeline to predict Titanic passenger survival using exploratory data analysis, feature engineering, and multiple classification models.
+A machine learning pipeline to predict Titanic passenger survival using exploratory data analysis, feature engineering, and multiple classification models.
 
 ## Overview
 
 This project implements a complete ML workflow for binary classification: predicting whether a passenger survived the Titanic disaster based on demographic and voyage data.
 
-**Latest Version**: Advanced ensemble with 5 optimization strategies
-- **Original Accuracy**: 76.315%
-- **Achieved**: 0.8841 ROC-AUC with stacking ensemble
-- **Improvements**: Ensemble stacking, KNN imputation, feature interactions, grid search, threshold tuning
-- **Predicted Survival Rate**: 40.67%
-
-The pipeline trains and compares multiple models (Logistic Regression, Random Forest, Gradient Boosting, XGBoost) using stratified cross-validation with advanced techniques.
+- **Best CV Accuracy**: ~83.9% (Random Forest / Gradient Boosting)
+- **Models**: Logistic Regression, Random Forest, Gradient Boosting, XGBoost, SVC, Soft Voting Ensemble
+- **Cross-Validation**: 5-fold stratified (preserves 38% positive class ratio)
 
 ## Dataset
 
@@ -24,11 +20,11 @@ The pipeline trains and compares multiple models (Logistic Regression, Random Fo
 
 ### Target
 - **Survived**: Binary (0 = Did not survive, 1 = Survived)
-  - Class distribution: 38.4% survived (moderately imbalanced)
+  - Class distribution: 38.4% survived, 61.6% died
 
 ### Missing Values
-- Age: 177 missing (imputed by Title + Pclass median)
-- Cabin: 77% missing (extracted deck letter)
+- Age: 263 missing (imputed by Title + Pclass median)
+- Cabin: 77% missing (deck letter extracted, U for unknown)
 - Embarked: 2 missing (filled with mode)
 - Fare: 1 missing in test (filled with median)
 
@@ -37,15 +33,15 @@ The pipeline trains and compares multiple models (Logistic Regression, Random Fo
 ```
 titanic-machine-learning/
 ├── data/
-│   ├── train.csv              # 891 passengers, labeled
-│   ├── test.csv               # 418 passengers, unlabeled
-│   └── gender_submission.csv  # Output schema reference
+│   ├── train.csv                                    # 891 passengers, labeled
+│   ├── test.csv                                     # 418 passengers, unlabeled
+│   └── gender_submission.csv                        # Output schema reference
 ├── notebooks/
-│   └── titanic_analysis.ipynb # Main analysis notebook
+│   └── titanic-survival-prediction-model.ipynb      # Main notebook
 ├── outputs/
-│   └── submission.csv         # Final predictions (generated)
-├── requirements.txt           # Python dependencies
-└── README.md                  # This file
+│   └── submission.csv                               # Final predictions (generated)
+├── requirements.txt                                 # Python dependencies
+└── README.md
 ```
 
 ## Installation
@@ -65,7 +61,7 @@ titanic-machine-learning/
 ### Run the Analysis
 
 ```bash
-jupyter notebook notebooks/titanic_analysis.ipynb
+jupyter notebook notebooks/titanic-survival-prediction-model.ipynb
 ```
 
 Then in Jupyter:
@@ -75,19 +71,19 @@ Then in Jupyter:
 ### Run Non-Interactively
 
 ```bash
-jupyter nbconvert --to notebook --execute notebooks/titanic_analysis.ipynb
+jupyter nbconvert --to notebook --execute notebooks/titanic-survival-prediction-model.ipynb
 ```
 
 ### Output
 
-The notebook generates `outputs/submission.csv` with predictions for all 418 test passengers.
+The notebook generates `submission.csv` with predictions for all 418 test passengers.
 
 ## Notebook Sections
 
 ### Section 0: Imports & Data Loading
 - Loads train.csv and test.csv
 - Combines data for unified feature engineering (prevents train/test skew)
-- Displays data shapes and types
+- Defines `style_table()` helper for consistent table formatting
 
 ### Section 1: Exploratory Data Analysis
 - Survival rate analysis (38.4% positive class)
@@ -97,187 +93,91 @@ The notebook generates `outputs/submission.csv` with predictions for all 418 tes
 - Missing value summary
 
 ### Section 2: Feature Engineering
-Transforms raw features into predictive signals:
+Transforms raw features into predictive signals on combined train+test data:
 
 | Feature | Source | Method |
 |---------|--------|--------|
-| Title | Name | Regex extraction + consolidate rare titles |
-| Age | Age | **KNN imputation (k=5)** with feature correlations |
+| Title | Name | Regex extraction + explicit mapping of rare titles |
+| Age (imputed) | Age | Median by Title + Pclass group |
+| Deck | Cabin | Extract first letter (A-G, T, U for unknown) |
 | FamilySize | SibSp + Parch | Direct sum + 1 |
 | IsAlone | FamilySize | Binary flag (1 if alone) |
-| Deck | Cabin | Extract first letter (U for missing) |
 | LogFare | Fare | log1p transform (handles Fare=0) |
 | FareBin | Fare | Quantile-based binning (4 bins) |
-| AgeBin | Age | Cut into 5 age groups |
-| **Age × Title** | **Age, Title** | **Interaction: captures age distribution by title** |
-| **Fare × Pclass** | **Fare, Pclass** | **Interaction: captures wealth variance within class** |
-| **Pclass_1_Female** | **Pclass, Sex** | **Binary flag: strongest survival predictor** |
+| AgeBin | Age | Cut into 5 age groups (Child, Teen, YoungAdult, Adult, Senior) |
+| Pclass_1_Female | Pclass, Sex | Interaction: 1st class women (strongest survival signal) |
+| Pclass_2_Female | Pclass, Sex | Interaction: 2nd class women |
+| Pclass_3_Male | Pclass, Sex | Interaction: 3rd class men (lowest survival) |
 
 ### Section 3: Preprocessing
-- Drops raw features (PassengerId, Name, Ticket, Cabin)
-- One-hot encodes categorical variables
+- Selects 17 features (raw + engineered)
+- One-hot encodes categoricals (Sex, Title, Deck, FareBin, AgeBin, Embarked) with `drop_first=False`
+- Results in 39 encoded features
 - Aligns test set columns to training set (handles unseen categories)
-- Scales features for Logistic Regression only (via Pipeline)
 
 ### Section 4: Model Training
-Trains models with 5-fold stratified cross-validation and advanced techniques:
+Trains 5 individual models + 1 ensemble with 5-fold stratified cross-validation:
 
-**Individual Models (ROC-AUC)**:
-
-| Model | Configuration | CV ROC-AUC |
-|-------|---------------|------------|
-| **Stacking Ensemble** | **GB+XGB+RF + LR meta** | **0.8841** ✓ |
-| XGBoost | n_est=200, lr=0.03, depth=4, scale_pos_weight=1.605 | 0.8826 |
-| Gradient Boosting | n_est=200, lr=0.07, depth=4 | 0.8820 |
-| RF (Grid Search) | n_est=300, depth=6, min_leaf=4 | 0.8783 |
-
-**Ensemble Method**:
-- **Stacking**: 3 base learners (GB, XGBoost, RF) + Logistic Regression meta-learner
-- **Meta-features**: Probability predictions from each base model
-- **Achieved gain**: +0.0157 over best individual model (XGBoost)
-
-**Threshold Optimization**:
-- **Default threshold**: 0.50 (standard classification)
-- **Optimized threshold**: 0.52 (F1: 0.7841)
-- **Why**: Fine-tuned for imbalanced dataset (38% survival rate), maximizes F1-score
-- **Improvement**: +0.005 F1 vs default threshold
-
-**Performance**: CV ROC-AUC 0.8841 achieved with stacking ensemble
+| Model | Configuration | CV Accuracy |
+|-------|---------------|-------------|
+| Random Forest | n_est=200, depth=6, min_leaf=2 | ~83.9% |
+| Gradient Boosting | n_est=200, lr=0.05, depth=4 | ~83.9% |
+| XGBoost | n_est=200, lr=0.05, depth=4 | ~83.1% |
+| SVC | RBF kernel, C=1.0, scaled | ~82.9% |
+| Logistic Regression | StandardScaler + default C | ~82.6% |
+| Soft Voting Ensemble | All 5 models, soft voting | ~83.8% |
 
 ### Section 5: Evaluation
-- Boxplot comparing CV accuracy across models
-- Confusion matrix on training data
+- Boxplot comparing CV accuracy across all models
+- Confusion matrix on training data (best model)
 - Classification report (precision, recall, F1)
 - Feature importance bar chart (top 15 features)
 
 ### Section 6: Final Prediction & Submission
-- Generates predictions for test set
-- Creates `outputs/submission.csv` with schema:
-  ```
-  PassengerId, Survived
-  892, 0
-  893, 1
-  ...
-  1309, 0
-  ```
+- Selects best model by CV mean accuracy
+- Generates predictions for all 418 test passengers
+- Saves `submission.csv` and validates against expected schema
+
+## Key Implementation Details
+
+1. **Unified feature engineering**: Train and test combined before imputation/encoding to prevent skew
+2. **Deck extraction**: 9-category encoding from Cabin (A-G, T, U) — captures survival-correlated deck location
+3. **Explicit title mapping**: Rare titles mapped to Mr/Mrs/Miss/Rare instead of frequency-based lumping
+4. **Stratified cross-validation**: Preserves 38/62% class balance across all 5 folds
+5. **Column alignment**: `X_test.reindex(columns=X_train.columns, fill_value=0)` handles unseen categories
+6. **Log transform**: `np.log1p()` for Fare (one passenger has Fare=0)
+7. **Scaling**: Only applied to Logistic Regression and SVC via Pipeline (tree models don't need it)
+8. **No data leakage**: Frequency-based features avoided; only imputation uses combined data
+9. **Reproducibility**: All models use `random_state=42`
 
 ## Verification
 
 After running the notebook, verify the output:
 
 ```bash
-python3 << 'EOF'
+python3 -c "
 import pandas as pd
-
-submission = pd.read_csv('outputs/submission.csv')
-
-# Check validity
-assert submission.shape == (418, 2), "Wrong shape"
-assert list(submission.columns) == ['PassengerId', 'Survived'], "Wrong columns"
-assert set(submission['Survived']).issubset({0, 1}), "Invalid values"
-assert submission.isnull().sum().sum() == 0, "Missing values"
-
-print("✅ Submission valid!")
-print(f"Predicted survival rate: {submission['Survived'].mean():.2%}")
-EOF
+s = pd.read_csv('outputs/submission.csv')
+assert s.shape == (418, 2), 'Wrong shape'
+assert list(s.columns) == ['PassengerId', 'Survived'], 'Wrong columns'
+assert set(s['Survived']).issubset({0, 1}), 'Invalid values'
+print('Valid submission')
+print(f'Predicted survival rate: {s[\"Survived\"].mean():.2%}')
+"
 ```
-
-## Key Implementation Details
-
-1. **Unified feature engineering**: Train and test combined before imputation to prevent data leakage
-2. **Stratified cross-validation**: Preserves class balance across folds
-3. **Column alignment**: X_test reindexed to X_train columns to handle unseen categories
-4. **Log transform**: Uses `np.log1p()` for Fare (one passenger has Fare=0)
-5. **Scaling**: Only applied to Logistic Regression via Pipeline (tree models ignore it)
-6. **Categorical encoding**: One-hot encoding with `pd.get_dummies()`
 
 ## Dependencies
 
 - `pandas>=2.0` — Data manipulation
 - `numpy>=1.24` — Numerical operations
-- `scikit-learn>=1.3` — Machine learning models and preprocessing
+- `scikit-learn>=1.3` — ML models and preprocessing
 - `matplotlib>=3.7` — Static plotting
 - `seaborn>=0.12` — Statistical visualizations
 - `jupyter>=1.0` — Notebook environment
 - `xgboost>=2.0` — Gradient boosting
-
-## Expected Output
-
-```
-outputs/submission.csv
-├─ Shape: 418 rows × 2 columns
-├─ Columns: PassengerId, Survived
-├─ Values: 0 (did not survive) or 1 (survived)
-└─ No missing values
-```
-
-## Advanced Optimizations
-
-This project includes 5 advanced strategies to maximize Kaggle accuracy:
-
-### 1. Ensemble Stacking
-- Combines 3 diverse base learners (GB, XGBoost, RF)
-- Uses Logistic Regression as meta-learner to learn optimal combination
-- Expected gain: +0.5-1.0%
-
-### 2. KNN Imputation
-- Replaced median imputation with K-Nearest Neighbors (k=5)
-- Preserves feature correlations when imputing Age
-- Expected gain: +0.3-0.5%
-
-### 3. Threshold Tuning
-- Optimized prediction threshold from 0.50 → 0.41
-- Balances precision/recall for imbalanced dataset
-- Expected gain: +0.3-0.8%
-
-### 4. Feature Interactions
-- Added Age × Title, Fare × Pclass, Pclass × Sex interactions
-- Captures non-linear relationships between features
-- Expected gain: +0.3-0.6%
-
-### 5. Hyperparameter Grid Search
-- Tuned GB: learning_rate 0.05 → 0.07 (CV: 0.8406 → 0.8417)
-- Tuned XGBoost: learning_rate 0.05 → 0.03, added class weighting
-- Expected gain: +0.5-1.5%
-
-**Cumulative achieved improvement**: ROC-AUC 0.8841 (44% gain over baseline accuracy baseline)
-
-## Notes
-
-- **Imbalanced class**: 62% negative, 38% positive — optimized with class weighting and threshold tuning
-- **Reproducibility**: All models use `random_state=42` for consistent results
-- **Hyperparameters**: Tuned using GridSearchCV with 5-fold cross-validation
-- **Feature count**: 18 features (removed redundancy: Fare, FarePerPerson, IsAlone)
-- **Predicted survival rate**: 40.67% (vs 38.38% training baseline)
-
-## Submission & Performance
-
-### Current Submission
-- **File**: `outputs/submission.csv`
-- **Model**: Stacking Ensemble (GB + XGBoost + RF base learners)
-- **CV ROC-AUC**: 0.8841 (5-fold stratified)
-- **Threshold**: 0.52 (optimized for F1)
-- **Predicted survival rate**: 40.67%
-- **Status**: Ready for Kaggle submission
-
-### How to Submit to Kaggle
-```bash
-# Option 1: Direct upload at https://www.kaggle.com/c/titanic
-# Choose "Submit Predictions" and upload outputs/submission.csv
-
-# Option 2: Kaggle API
-pip install kaggle
-kaggle competitions submit -c titanic -f outputs/submission.csv \
-  -m "Advanced ensemble: stacking + KNN + interactions + grid search + threshold tuning"
-```
 
 ## References
 
 - [Kaggle Titanic Competition](https://www.kaggle.com/c/titanic)
 - [Scikit-learn Documentation](https://scikit-learn.org/)
 - [XGBoost Documentation](https://xgboost.readthedocs.io/)
-
----
-
-**Last Updated**: 2026-03-19
-**Version**: 3.0 (Stacking Ensemble + Full Optimization Suite)
